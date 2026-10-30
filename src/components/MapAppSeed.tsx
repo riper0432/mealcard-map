@@ -303,7 +303,7 @@ export default function MapAppSeed() {
           </section>
           <section className={`flex flex-col gap-1.5 text-xs leading-relaxed ${muted}`}>
             <h3 className="font-bold">고른 규칙</h3>
-            <p>공식 업종이 일반음식점이고 식사형 업태인 곳만 봤어요. 술집·카페·편의점과 상호에 술집·비식당 표현이 있는 곳은 뺐고, 팀이 확인해 7곳을 더 뺐어요.</p>
+            <p>공식 업종이 일반음식점이고 식사형 업태인 곳만 봤어요. 술집·카페·편의점과 상호에 술집·비식당 표현이 있는 곳은 뺐고, 팀이 확인해 8곳을 더 뺐어요.</p>
             <h3 className="mt-2 font-bold">출처</h3>
             <p>춘천시 요식업소 현황(공공데이터포털 15003349, 2026-05-27), 춘천시 아동급식카드 가맹점(2026-08-26, 팀 전처리 4,395곳), 상가(상권)정보(15083033, 2026-06), 아동복지급식정보표준데이터(15034530), 초중등학교위치표준데이터(15021148, 2026-10). 춘천시 경계 © OpenStreetMap 기여자(ODbL). 지도 © Kakao. UI: SEED Design(Apache-2.0). 거리는 직선거리.</p>
           </section>
