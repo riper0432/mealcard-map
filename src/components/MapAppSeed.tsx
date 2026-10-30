@@ -57,6 +57,7 @@ export default function MapAppSeed() {
   const [tab, setTab] = useState("recs");
   const [q, setQ] = useState("");
   const [dong, setDong] = useState<string | null>(null); // 동네 탭: 고른 행정동(없으면 춘천시 전체)
+  const [school, setSchool] = useState<number | null>(null); // 고른 학교(지도에서 그 학교 1km 둘레를 그림)
   const [more, setMore] = useState(false);              // 동네 탭: 가맹 식당 전체 보기
   const [ctrlOpen, setCtrlOpen] = useState(false);     // 휴대폰: 조건 패널 펼침
   const [drawerOpen, setDrawerOpen] = useState(false); // 휴대폰: 아래 목록 서랍 펼침
@@ -95,10 +96,23 @@ export default function MapAppSeed() {
   const openDong = useCallback((c: string) => {
     if (!data) return;
     setDong(c);
+    setSchool(null);
     setMore(false);
     const pts: [number, number][] = [...data.members, ...data.non].filter((p) => p[4] === c).map((p) => [p[0], p[1]]);
     data.schools.filter((s) => s.g === c).forEach((s) => pts.push([s.y, s.x]));
     mapRef.current?.fit(pts);
+  }, [data]);
+
+  // 학교를 고르면: 그 학교 1km 원이 꽉 차게 이동하고, 1km 둘레의 원·식당 점과 학교 카드를 보여 준다
+  const selectSchool = useCallback((i: number) => {
+    if (!data || i < 0) return;
+    const s = data.schools[i];
+    setSchool(i);
+    setDong(s.g);
+    setSelected(null);
+    setDrawerOpen(false);
+    const dy = data.schoolR / 111320, dx = data.schoolR / (111320 * Math.cos((s.y * Math.PI) / 180));
+    mapRef.current?.fit([[s.y - dy, s.x - dx], [s.y + dy, s.x + dx]]);
   }, [data]);
 
   const schools = useMemo(() => {
@@ -111,6 +125,7 @@ export default function MapAppSeed() {
 
   const pickRec = useCallback((d: Rec) => {
     setSelected(d[2]);
+    setSchool(null);
     setDong(d[11]);          // 그 식당이 있는 동네의 원·점을 그린다
     setDrawerOpen(false);
     mapRef.current?.focus(d[3], d[4], 3);
@@ -247,7 +262,7 @@ export default function MapAppSeed() {
         <div>
           <List.Root>
             {schools.map((s) => (
-              <List.Item key={s.n} onClick={() => { setDong(s.g); mapRef.current?.focus(s.y, s.x, 6); }} className="cursor-pointer rounded-xl hover:bg-[var(--seed-color-bg-neutral-weak)]">
+              <List.Item key={s.n} onClick={() => selectSchool(data!.schools.indexOf(s))} className="cursor-pointer rounded-xl hover:bg-[var(--seed-color-bg-neutral-weak)]">
                 <List.Prefix><Dot square color={s.rc[M][R] > 0 ? "var(--map-ask)" : "var(--map-covered)"} /></List.Prefix>
                 <List.Content>
                   <List.Title>{s.n}</List.Title>
@@ -311,7 +326,7 @@ export default function MapAppSeed() {
       <main className="relative flex min-h-0 flex-1">
         <section className="relative min-w-0 flex-1">
           {data ? (
-            <KakaoMap ref={mapRef} data={data} R={R} M={M} layers={layers} dong={dong} onSelectRec={(rank) => { setSelected(rank); const r = recs.find((d) => d[2] === rank); if (r) setDong(r[11]); }} selectedRank={selected} />
+            <KakaoMap ref={mapRef} data={data} R={R} M={M} layers={layers} dong={dong} school={school} onSelectSchool={selectSchool} onSelectRec={(rank) => { setSelected(rank); const r = recs.find((d) => d[2] === rank); if (r) setDong(r[11]); }} selectedRank={selected} />
           ) : (
             <div className={`grid h-full place-items-center text-sm ${muted}`}>데이터를 불러오는 중…</div>
           )}
@@ -347,12 +362,51 @@ export default function MapAppSeed() {
             </div>
           </div>
 
-          {KEY && data && !dong && !sel && (
+          {KEY && data && !dong && school === null && !sel && (
             <button onClick={() => { setTab("dongs"); setDrawerOpen(true); }}
               className={`${panel} absolute bottom-[162px] left-3 z-10 px-3 py-1.5 text-xs lg:bottom-3`}>
               <span className="font-bold text-[var(--seed-color-fg-brand)]">동네를 고르면</span> <span className={muted}>그 동네의 가맹 원과 식당 점이 보여요</span>
             </button>
           )}
+
+          {/* 고른 학교 */}
+          {data && school !== null && !sel && (() => {
+            const s = data.schools[school];
+            const near = recs.filter((d) => d[7] === s.n);
+            return (
+              <div className={`${panel} absolute bottom-[162px] left-3 z-10 flex w-[min(360px,calc(100%-24px))] flex-col gap-3 p-4 lg:bottom-3`}>
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 size-4 shrink-0 rounded-full" style={{ background: s.rc[M][R] > 0 ? "var(--map-ask)" : "var(--map-covered)" }} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[17px] font-bold">{s.n}</div>
+                    <div className={`text-[13px] ${muted}`}>{s.d} · {s.k}</div>
+                  </div>
+                  <ActionButton variant="ghost" size="small" layout="iconOnly" aria-label="닫기" onClick={() => setSchool(null)}>
+                    <Icon svg={<IconXmarkLine />} />
+                  </ActionButton>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-xl bg-[var(--seed-color-bg-neutral-weak)] p-3">
+                    <div className={`text-xs ${muted}`}>1km 안 가맹점</div>
+                    <div className="font-mono text-lg font-bold leading-tight">{fmt(s.k1[M])}곳</div>
+                  </div>
+                  <div className="rounded-xl bg-[var(--seed-color-bg-brand-weak)] p-3">
+                    <div className={`text-xs ${muted}`}>1km 안 권유 식당</div>
+                    <div className="font-mono text-lg font-bold leading-tight text-[var(--seed-color-fg-brand)]">{s.rc[M][R]}곳</div>
+                  </div>
+                </div>
+                {near.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {near.map((d) => (
+                      <button key={d[5]} onClick={() => pickRec(d)} className="rounded-full bg-[var(--seed-color-bg-neutral-weak)] px-2.5 py-1 text-xs hover:bg-[var(--seed-color-bg-neutral-weak-pressed)]">
+                        <span className="font-bold text-[var(--map-non)]">{d[2]}</span> {d[5]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 선택한 권유 식당 */}
           {sel && (

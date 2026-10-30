@@ -18,6 +18,8 @@ export interface KakaoMapHandle {
 interface Props {
   data: MapData; R: number; M: Mode; layers: Layers;
   dong: string | null;                     // 고른 행정동 코드. 없으면 원·식당 점을 그리지 않는다
+  school: number | null;                   // 고른 학교(data.schools 번호). 있으면 그 학교 1km 둘레를 동네보다 먼저 그린다
+  onSelectSchool?: (i: number) => void;   // 학교 점을 눌렀을 때
   onSelectRec?: (rank: number) => void;   // 권유 식당 점을 눌렀을 때 순위를 알린다
   selectedRank?: number | null;
 }
@@ -32,15 +34,17 @@ function dot(color: string, size: number, ring?: string) {
   return el;
 }
 
-const KakaoMap = forwardRef<KakaoMapHandle, Props>(function KakaoMap({ data, R, M, layers, dong, onSelectRec, selectedRank }, ref) {
+const KakaoMap = forwardRef<KakaoMapHandle, Props>(function KakaoMap({ data, R, M, layers, dong, school, onSelectSchool, onSelectRec, selectedRank }, ref) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<K>(null);
   const tip = useRef<K>(null);                 // 마우스 올리면 뜨는 설명 상자(하나를 돌려 씀)
   const fixed = useRef<{ schoolRings: K[]; schoolDots: { ov: K; el: HTMLDivElement }[]; recs: K[] }>({ schoolRings: [], schoolDots: [], recs: [] });
   const dyn = useRef<K[]>([]);                 // 고른 동네의 원·식당 점(동네가 바뀌면 다시 그림)
   const [ready, setReady] = useState(false);
-  const state = useRef({ R, M, layers, dong });
-  state.current = { R, M, layers, dong };
+  const onSelect = useRef(onSelectSchool);     // 학교 점 클릭은 처음 한 번 붙이므로 최신 콜백을 ref로 들고 있는다
+  onSelect.current = onSelectSchool;
+  const state = useRef({ R, M, layers, dong, school });
+  state.current = { R, M, layers, dong, school };
 
   useImperativeHandle(ref, () => ({
     fit(points) {
@@ -95,12 +99,13 @@ const KakaoMap = forwardRef<KakaoMapHandle, Props>(function KakaoMap({ data, R, 
       return new k.maps.Circle({ center: new k.maps.LatLng(s.y, s.x), radius: data.schoolR,
         strokeWeight: 1, strokeStyle: "dash", strokeColor: COLOR.covered, strokeOpacity: 0.8, fillColor: COLOR.covered, fillOpacity: 0.04 });
     });
-    fixed.current.schoolDots = data.schools.map((s) => {
+    fixed.current.schoolDots = data.schools.map((s, i) => {
       const el = dot(COLOR.covered, 16);
       hoverable(el, s.y, s.x, () => {
         const { R, M } = state.current;
         return `<b>${s.n}</b> (${s.d})<br>1km 안 가맹점 ${s.k1[M].toLocaleString()}곳 (편의점 ${M})<br>1km 안 권유 식당 ${s.rc[M][R]}곳 (가맹 원 ${R}m)`;
       });
+      el.addEventListener("click", () => onSelect.current?.(i));
       const ov = new k.maps.CustomOverlay({ map: m, position: new k.maps.LatLng(s.y, s.x), content: el, zIndex: 5 });
       return { ov, el };
     });
@@ -115,8 +120,16 @@ const KakaoMap = forwardRef<KakaoMapHandle, Props>(function KakaoMap({ data, R, 
     if (!m) return;
     dyn.current.forEach((o) => o.setMap(null));
     dyn.current = [];
-    const { R, M, layers, dong } = state.current;
-    if (!dong) return;
+    const { R, M, layers, dong, school } = state.current;
+    if (!dong && school === null) return;
+    // 고른 학교가 있으면 그 학교 1km 원(+가맹 원 반경) 안의 것, 아니면 고른 동네의 것
+    const s = school !== null ? data.schools[school] : null;
+    const cos = Math.cos((s?.y ?? 37.9) * Math.PI / 180);
+    const near = (y: number, x: number) => {
+      const dy = (y - s!.y) * 111320, dx = (x - s!.x) * 111320 * cos;
+      return dy * dy + dx * dx <= (data.schoolR + R) ** 2;
+    };
+    const keep = (y: number, x: number, g: string) => (s ? near(y, x) : g === dong);
     const add = (y: number, x: number, color: string, size: number, html: string, circle: boolean) => {
       const pos = new k.maps.LatLng(y, x);
       if (circle && layers.ring) {
@@ -126,9 +139,9 @@ const KakaoMap = forwardRef<KakaoMapHandle, Props>(function KakaoMap({ data, R, 
       hoverable(el, y, x, () => html);
       dyn.current.push(new k.maps.CustomOverlay({ map: m, position: pos, content: el, zIndex: 2 }));
     };
-    for (const [y, x, n, t, g] of data.members) if (g === dong) add(y, x, COLOR.member, 6, `<b>${n}</b><br>가맹 · ${t}`, true);
-    if (M === "포함") for (const [y, x, n, g] of data.cvs) if (g === dong) add(y, x, COLOR.cvs, 6, `<b>${n}</b><br>가맹 · 편의점`, true);
-    if (layers.non) for (const [y, x, n, t, g] of data.non) if (g === dong) add(y, x, COLOR.non, 7, `<b>${n}</b><br>미가맹 · ${t}`, false);
+    for (const [y, x, n, t, g] of data.members) if (keep(y, x, g)) add(y, x, COLOR.member, 6, `<b>${n}</b><br>가맹 · ${t}`, true);
+    if (M === "포함") for (const [y, x, n, g] of data.cvs) if (keep(y, x, g)) add(y, x, COLOR.cvs, 6, `<b>${n}</b><br>가맹 · 편의점`, true);
+    if (layers.non) for (const [y, x, n, t, g] of data.non) if (keep(y, x, g)) add(y, x, COLOR.non, 7, `<b>${n}</b><br>미가맹 · ${t}`, false);
   }, [data, hoverable]);
 
   // 반경·편의점·레이어가 바뀌면 학교 색, 권유 식당, 화면 안 점을 다시 그린다
@@ -143,7 +156,9 @@ const KakaoMap = forwardRef<KakaoMapHandle, Props>(function KakaoMap({ data, R, 
       el.style.width = el.style.height = has ? "22px" : "16px";
       el.style.boxShadow = `0 0 0 ${has ? 3 : 2}px ${has ? COLOR.ink : "#fff"}`;
       fixed.current.schoolRings[i].setOptions({ strokeColor: col, fillColor: col, strokeWeight: has ? 2 : 1 });
-      fixed.current.schoolRings[i].setMap(layers.schoolRing && dong && s.g === dong ? m : null);
+      const show = school !== null ? i === school : !!dong && s.g === dong;
+      fixed.current.schoolRings[i].setMap(layers.schoolRing && show ? m : null);
+      if (i === school) el.style.boxShadow = `0 0 0 3px #fff, 0 0 0 6px ${col}`;
     });
     fixed.current.recs.forEach((o) => o.setMap(null));
     fixed.current.recs = data.recs.filter((d) => d[0] === M && d[1] === R).map((d) => {
@@ -156,7 +171,7 @@ const KakaoMap = forwardRef<KakaoMapHandle, Props>(function KakaoMap({ data, R, 
       return new k.maps.CustomOverlay({ map: m, position: new k.maps.LatLng(y, x), content: el, zIndex: sel ? 6 : 4 });
     });
     drawDynamic();
-  }, [ready, R, M, layers, dong, data, drawDynamic, hoverable, onSelectRec, selectedRank]);
+  }, [ready, R, M, layers, dong, school, data, drawDynamic, hoverable, onSelectRec, selectedRank]);
 
   // SDK가 이미 로드돼 있으면(페이지 이동 후) 바로 시작
   useEffect(() => { if (window.kakao?.maps) window.kakao.maps.load(init); }, [init]);
